@@ -1,0 +1,338 @@
+-- Ultimate All-In-One HUD LocalScript
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- Example remote (replace with your game)
+local shootEvent = ReplicatedStorage:WaitForChild("ShootEvent")
+
+-- GUI
+local playerGui = player:WaitForChild("PlayerGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UltimateHUD_Full"
+screenGui.Parent = playerGui
+
+-- Settings
+local settings = {
+    Colors = {HL=Color3.fromRGB(0,255,0), Aim=Color3.fromRGB(0,0,255), Auto=Color3.fromRGB(255,0,0), Line=Color3.fromRGB(255,255,255), Predict=Color3.fromRGB(255,200,0)},
+    ButtonSize = 30,
+    ButtonTransparency = 0.2,
+    LineThickness = 2
+}
+
+-- Save/load
+local function saveSettings()
+    if not isfolder("UltimateHUD") then makefolder("UltimateHUD") end
+    writefile("UltimateHUD/settings.json", HttpService:JSONEncode(settings))
+end
+local function loadSettings()
+    if isfile("UltimateHUD/settings.json") then
+        settings = HttpService:JSONDecode(readfile("UltimateHUD/settings.json"))
+    end
+end
+loadSettings()
+
+-- Notification
+local notificationFrame = Instance.new("Frame")
+notificationFrame.Size = UDim2.new(0,250,0,30)
+notificationFrame.Position = UDim2.new(0.5,-125,0.1,0)
+notificationFrame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+notificationFrame.BackgroundTransparency = 0.3
+notificationFrame.Visible = false
+notificationFrame.Parent = screenGui
+
+local notificationLabel = Instance.new("TextLabel")
+notificationLabel.Size = UDim2.new(1,0,1,0)
+notificationLabel.BackgroundTransparency = 1
+notificationLabel.TextColor3 = Color3.new(1,1,1)
+notificationLabel.Font = Enum.Font.GothamBold
+notificationLabel.TextScaled = true
+notificationLabel.Parent = notificationFrame
+
+local function showNotification(text)
+    notificationLabel.Text = text
+    notificationFrame.Visible = true
+    TweenService:Create(notificationFrame,TweenInfo.new(0.3),{BackgroundTransparency=0.3}):Play()
+    task.delay(1.5,function()
+        TweenService:Create(notificationFrame,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play()
+        task.wait(0.5)
+        notificationFrame.Visible=false
+    end)
+end
+
+-- Player states
+local playerStates = {}
+
+local function createHUD(plr)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0,120,0,30)
+    frame.BackgroundTransparency = 1
+    frame.Parent = screenGui
+    playerStates[plr] = {HL=false,Aim=false,Auto=false,frame=frame,lastPos=nil,targetScale=1,currentScale=1,targetTransparency=settings.ButtonTransparency,currentTransparency=settings.ButtonTransparency}
+    local state = playerStates[plr]
+
+    local function createButton(label,color,x)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0,settings.ButtonSize,0,settings.ButtonSize)
+        btn.Position = UDim2.new(0,x,0,0)
+        btn.Text = label
+        btn.TextSize = 14
+        btn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Font = Enum.Font.GothamBold
+        btn.Parent = frame
+
+        btn.MouseButton1Click:Connect(function()
+            state[label] = not state[label]
+            local targetColor = state[label] and color or Color3.fromRGB(80,80,80)
+            TweenService:Create(btn,TweenInfo.new(0.3),{BackgroundColor3=targetColor,Size=UDim2.new(0,settings.ButtonSize*1.2,0,settings.ButtonSize*1.2)}):Play()
+            task.delay(0.15,function()
+                TweenService:Create(btn,TweenInfo.new(0.2),{Size=UDim2.new(0,settings.ButtonSize,0,settings.ButtonSize)}):Play()
+            end)
+            if label=="HL" and plr.Character then
+                local h = plr.Character:FindFirstChild("Highlight")
+                if state.HL then
+                    if not h then
+                        h = Instance.new("Highlight")
+                        h.FillColor = color
+                        h.FillTransparency = 0.5
+                        h.Parent = plr.Character
+                    end
+                else
+                    if h then h:Destroy() end
+                end
+            end
+            showNotification(label.." "..(state[label] and "ON" or "OFF").." for "..plr.Name)
+        end)
+        return btn
+    end
+
+    state.HLButton = createButton("HL",settings.Colors.HL,0)
+    state.AimButton = createButton("Aim",settings.Colors.Aim,40)
+    state.AutoButton = createButton("Auto",settings.Colors.Auto,80)
+
+    -- Lines
+    state.Line = Instance.new("Frame")
+    state.Line.Size = UDim2.new(0,settings.LineThickness,0,0)
+    state.Line.BackgroundColor3 = settings.Colors.Line
+    state.Line.BorderSizePixel = 0
+    state.Line.AnchorPoint = Vector2.new(0.5,0)
+    state.Line.Parent = screenGui
+
+    state.PredictLine = Instance.new("Frame")
+    state.PredictLine.Size = UDim2.new(0,settings.LineThickness,0,0)
+    state.PredictLine.BackgroundColor3 = settings.Colors.Predict
+    state.PredictLine.BorderSizePixel = 0
+    state.PredictLine.AnchorPoint = Vector2.new(0.5,0)
+    state.PredictLine.Parent = screenGui
+end
+
+for _,plr in ipairs(Players:GetPlayers()) do if plr~=player then createHUD(plr) end end
+Players.PlayerAdded:Connect(function(plr) if plr~=player then createHUD(plr) end end)
+Players.PlayerRemoving:Connect(function(plr)
+    if playerStates[plr] then
+        if playerStates[plr].frame then playerStates[plr].frame:Destroy() end
+        if playerStates[plr].Line then playerStates[plr].Line:Destroy() end
+        if playerStates[plr].PredictLine then playerStates[plr].PredictLine:Destroy() end
+        playerStates[plr] = nil
+    end
+end)
+
+-- Customization panel
+local customFrame = Instance.new("Frame")
+customFrame.Size = UDim2.new(0,350,0,500)
+customFrame.Position = UDim2.new(0.65,0,0.1,0)
+customFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+customFrame.Parent = screenGui
+
+local uilist = Instance.new("UIListLayout")
+uilist.FillDirection = Enum.FillDirection.Vertical
+uilist.SortOrder = Enum.SortOrder.LayoutOrder
+uilist.Padding = UDim.new(0,5)
+uilist.Parent = customFrame
+
+-- RGB color pickers
+local function createColorPicker(name,color)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1,0,0,20)
+    label.Text = name
+    label.TextColor3 = Color3.new(1,1,1)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.Parent = customFrame
+
+    local function createSlider(channel)
+        local slider = Instance.new("TextButton")
+        slider.Size = UDim2.new(1,0,0,20)
+        slider.Text = channel..": "..math.floor(color[channel]*255)
+        slider.Font = Enum.Font.Gotham
+        slider.TextColor3 = Color3.new(1,1,1)
+        slider.BackgroundColor3 = Color3.fromRGB(50,50,50)
+        slider.Parent = customFrame
+        slider.MouseButton1Click:Connect(function()
+            local newVal = math.random(0,255)
+            color[channel] = newVal/255
+            slider.Text = channel..": "..newVal
+            for _,state in pairs(playerStates) do
+                if name=="HL" and state.HLButton then state.HLButton.BackgroundColor3 = settings.Colors.HL end
+                if name=="Aim" and state.AimButton then state.AimButton.BackgroundColor3 = settings.Colors.Aim end
+                if name=="Auto" and state.AutoButton then state.AutoButton.BackgroundColor3 = settings.Colors.Auto end
+                if name=="Line" and state.Line then state.Line.BackgroundColor3 = settings.Colors.Line end
+                if name=="Predict" and state.PredictLine then state.PredictLine.BackgroundColor3 = settings.Colors.Predict end
+            end
+            saveSettings()
+        end)
+    end
+    createSlider("R")
+    createSlider("G")
+    createSlider("B")
+end
+
+for name,color in pairs(settings.Colors) do
+    createColorPicker(name,color)
+end
+
+-- Size & line thickness sliders
+local function createNumberSlider(name, value, min, max, step, callback)
+    local slider = Instance.new("TextButton")
+    slider.Size = UDim2.new(1,0,0,20)
+    slider.Text = name..": "..value
+    slider.Font = Enum.Font.Gotham
+    slider.TextColor3 = Color3.new(1,1,1)
+    slider.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    slider.Parent = customFrame
+    slider.MouseButton1Click:Connect(function()
+        local newVal = math.clamp(value + step, min, max)
+        value = newVal
+        slider.Text = name..": "..value
+        callback(newVal)
+        saveSettings()
+    end)
+end
+
+createNumberSlider("ButtonSize", settings.ButtonSize, 10, 60, 5, function(v) settings.ButtonSize=v end)
+createNumberSlider("LineThickness", settings.LineThickness, 1, 10, 1, function(v) settings.LineThickness=v end)
+
+-- Icon-only compact frame
+local compactFrame = Instance.new("Frame")
+compactFrame.Size = UDim2.new(0,0,0,0)
+compactFrame.Position = UDim2.new(0.5,-50,0.9,0)
+compactFrame.BackgroundTransparency = 1
+compactFrame.Parent = screenGui
+
+local iconMode = true -- full mode by default
+
+local function updateCompactButtons()
+    compactFrame:ClearAllChildren()
+    local xOffset = 0
+    for _,state in pairs(playerStates) do
+        for _,label in pairs({"HLButton","AimButton","AutoButton"}) do
+            local btn = state[label]
+            if btn and btn.Visible then
+                local iconBtn = Instance.new("TextButton")
+                iconBtn.Size = UDim2.new(0, settings.ButtonSize, 0, settings.ButtonSize)
+                iconBtn.Position = UDim2.new(0, xOffset, 0, 0)
+                iconBtn.BackgroundColor3 = btn.BackgroundColor3
+                iconBtn.Text = ""
+                iconBtn.AutoButtonColor = true
+                iconBtn.Parent = compactFrame
+                iconBtn.MouseButton1Click:Connect(function()
+                    btn:CaptureMouseClick()
+                end)
+                xOffset = xOffset + settings.ButtonSize + 5
+            end
+        end
+    end
+end
+
+-- F2 toggle full/compact
+UserInputService.InputBegan:Connect(function(input,processed)
+    if processed then return end
+    if input.KeyCode==Enum.KeyCode.F2 then
+        iconMode = not iconMode
+        if iconMode then
+            customFrame.Visible = true
+            for _,state in pairs(playerStates) do
+                state.frame.Visible = true
+                if state.Line then state.Line.Visible = true end
+                if state.PredictLine then state.PredictLine.Visible = true end
+            end
+            compactFrame.Visible = false
+            showNotification("HUD: Full Mode")
+        else
+            customFrame.Visible = false
+            for _,state in pairs(playerStates) do
+                state.frame.Visible = false
+                if state.Line then state.Line.Visible = false end
+                if state.PredictLine then state.PredictLine.Visible = false end
+            end
+            updateCompactButtons()
+            compactFrame.Visible = true
+            showNotification("HUD: Icon-Only Mode")
+        end
+    end
+end)
+
+-- Main loop
+RunService.RenderStepped:Connect(function()
+    local localRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return end
+    for plr,state in pairs(playerStates) do
+        if plr.Character and plr.Character:FindFirstChild("Head") then
+            local head = plr.Character.Head
+            local screenPos,onScreen = camera:WorldToViewportPoint(head.Position+Vector3.new(0,2,0))
+            local dist=(head.Position-localRoot.Position).Magnitude
+            local desiredScale=math.clamp(1/(dist/30),0.5,1.5)
+            state.currentScale = state.currentScale+(desiredScale-state.currentScale)*0.1
+
+            local ray = Ray.new(localRoot.Position,(head.Position-localRoot.Position))
+            local part = workspace:FindPartOnRayWithIgnoreList(ray,{player.Character,plr.Character})
+            local desiredTransparency = part and 0.5 or settings.ButtonTransparency
+            state.currentTransparency = state.currentTransparency+(desiredTransparency-state.currentTransparency)*0.1
+
+            local targetX = screenPos.X-60
+            local targetY = screenPos.Y-15
+            if not onScreen then targetY = -50 end
+            state.frame.Position = UDim2.new(0,targetX,0,targetY)
+            state.frame.Visible = iconMode
+
+            for _,btn in pairs({state.HLButton,state.AimButton,state.AutoButton}) do
+                btn.Size = UDim2.new(0,settings.ButtonSize*state.currentScale,0,settings.ButtonSize*state.currentScale)
+                btn.BackgroundTransparency = state.currentTransparency
+            end
+
+            -- Center line
+            if state.Line then
+                state.Line.Size = UDim2.new(0,settings.LineThickness,0,(Vector2.new(screenPos.X,screenPos.Y)-Vector2.new(camera.ViewportSize.X/2,camera.ViewportSize.Y/2)).Magnitude)
+                state.Line.Position = UDim2.new(0,camera.ViewportSize.X/2,0,camera.ViewportSize.Y/2)
+                state.Line.Rotation = math.deg(math.atan2(screenPos.Y-camera.ViewportSize.Y/2,screenPos.X-camera.ViewportSize.X/2))-90
+            end
+
+            -- Predictive line
+            if state.PredictLine then
+                if state.lastPos then
+                    local predictPos = head.Position + (head.Position - state.lastPos)
+                    local predictScreen,_ = camera:WorldToViewportPoint(predictPos+Vector3.new(0,2,0))
+                    local lineVec = Vector2.new(predictScreen.X,predictScreen.Y)-Vector2.new(screenPos.X,screenPos.Y)
+                    state.PredictLine.Size = UDim2.new(0,settings.LineThickness,0,lineVec.Magnitude)
+                    state.PredictLine.Position = UDim2.new(0,screenPos.X,0,screenPos.Y)
+                    state.PredictLine.Rotation = math.deg(math.atan2(lineVec.Y,lineVec.X))-90
+                end
+                state.lastPos = head.Position
+            end
+
+            -- Aim/Auto
+            if state.Aim then camera.CFrame = CFrame.new(camera.CFrame.Position,head.Position) end
+            if state.Auto then shootEvent:FireServer(plr) end
+        end
+    end
+    -- Keep compact buttons aligned
+    if not iconMode and compactFrame.Visible then
+        updateCompactButtons()
+    end
+end)
